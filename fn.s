@@ -71,38 +71,41 @@ make_tables:
 .L3:
 	.loc 1 22 0
 .LVL3:
-	vmul.f32	q10, q9, d0[0]
+	vmul.f32	q10, q9, d0[0] @x = i * range/count
 .LVL4:
 	.loc 1 24 0
-	vmul.f32	q11, q10, q10
+	vmul.f32	q11, q10, q10  @x2 = x * x
 	.loc 1 25 0
-	vmov	q15, q3
-	vmla.f32 q15, q11, q4
-	vmov	q14, q2
-	vmla.f32 q14, q15, q11
-	vmov 	q13, q1
-	vmla.f32 q13, q14, q11
-	vst1.32	{q13}, [r0]!
+
+	vmov q15, q3         @Load cc3 in q15
+	vmov q14, q1	     @Load cc1 in q14
+	vmul.f32 q13, q11, q11   @calculate x4
+
+	vmla.f32 q15, q11, q4    @ cc3 + cc4*x2
+
+	vmla.f32 q14, q11, q2	@cc1 + cc2*x2
+	vmla.f32 q14, q13, q15  @ Final cos value
+
+	vmul.f32	q10, q10, d0[1]    @x = x * FOUR_BY_PI
+	vst1.32	{q14}, [r0]!               @ store result for cos
 	.loc 1 27 0
 	@start of tan
-	vmul.f32	q10, q10, d0[1] 
 .LVL5:
 	.loc 1 28 0
-	vmul.f32	q11, q10, q10
-	vmov	q15, q6
-	vmla.f32 q15, q5, q11
-	vmul.f32 q15, q15, q10
+	vmul.f32	q11, q10, q10     @ x2 = x * x
+	vmov	q15, q6                   @load tc1 in q15 
+	vadd.f32 q9, q9, q8               @Increment "i" array
+	vmla.f32 q15, q5, q11		  @tc1 + tc2 * x2
+	vsub.f32	q14, q11, q7 	  @tc2 + x2
+	vmul.f32 q15, q15, q10		  @x2 * Numerator
 .LVL6:
-	vsub.f32	q14, q11, q7
-	vrecpe.f32 q13, q14
-	vmul.f32 q13, q13, q15
-	vst1.32	{q13}, [r1]!
-	.loc 1 34 0
-	add	ip, ip, #4
-	vadd.f32 q9, q9, q8
-	@add	r3, r3, #4	@ increment offset in arrays
-	.loc 1 21 0
+	vrecpe.f32 q13, q14		  @ Reverse denominator
+	add	ip, ip, #4		  @ Increment looper
 	cmp	r2, ip		@ test for end of loop
+	vmul.f32 q13, q13, q15		  @Final tan value
+	vst1.32	{q13}, [r1]!		  @ store
+	.loc 1 34 0
+	.loc 1 21 0
 	bhi	.L3
 .LVL7:
 .L4:
