@@ -100,12 +100,37 @@ make_tables:
 	vmul.f32 q15, q15, q10		  @x2 * Numerator
 .LVL6:
 	vrecpe.f32 q13, q14		  @ Reverse denominator
-	add	ip, ip, #4		  @ Increment looper
+	vmul.f32	q10, q9, d0[0] @x = i * range/count
+	vmul.f32 q13, q13, q15		  @Final tan value
+	vst1.32	{q13}, [r1]!		  @ store
+
+
+	vmov q15, q3         @Load cc3 in q15
+	vmul.f32	q11, q10, q10  @x2 = x * x
+
+	vmov q14, q1	     @Load cc1 in q14
+	vmul.f32 q13, q11, q11   @calculate x4
+
+	vmla.f32 q15, q11, q4    @ cc3 + cc4*x2
+
+	vmla.f32 q14, q11, q2	@cc1 + cc2*x2
+	vmul.f32	q10, q10, d0[1]   @x = x * FOUR_BY_PI
+	vmla.f32 q14, q13, q15  	  @ Final cos value. Avoid WAW
+
+	vst1.32	{q14}, [r0]!               @ store result for cos
+
+	@start of tan
+	vmul.f32	q11, q10, q10     @ x2 = x * x
+	vmov	q15, q6                   @load tc1 in q15 
+	vadd.f32 q9, q9, q8               @Increment "i" array
+	vmla.f32 q15, q5, q11		  @tc1 + tc2 * x2
+	vsub.f32	q14, q11, q7 	  @tc2 + x2
+	vmul.f32 q15, q15, q10		  @x2 * Numerator
+	vrecpe.f32 q13, q14		  @ Reverse denominator
+	add	ip, ip, #8		  @ Increment looper
 	cmp	r2, ip		@ test for end of loop
 	vmul.f32 q13, q13, q15		  @Final tan value
 	vst1.32	{q13}, [r1]!		  @ store
-	.loc 1 34 0
-	.loc 1 21 0
 	bhi	.L3
 .LVL7:
 .L4:
