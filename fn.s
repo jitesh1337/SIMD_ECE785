@@ -74,19 +74,19 @@ make_tables:
 	vmul.f32	q10, q9, d0[0] @x = i * range/count
 .LVL4:
 	.loc 1 24 0
+	vmov q15, q3         @Load cc3 in q15
 	vmul.f32	q11, q10, q10  @x2 = x * x
 	.loc 1 25 0
 
-	vmov q15, q3         @Load cc3 in q15
 	vmov q14, q1	     @Load cc1 in q14
 	vmul.f32 q13, q11, q11   @calculate x4
 
 	vmla.f32 q15, q11, q4    @ cc3 + cc4*x2
 
 	vmla.f32 q14, q11, q2	@cc1 + cc2*x2
-	vmla.f32 q14, q13, q15  @ Final cos value
-
 	vmul.f32	q10, q10, d0[1]    @x = x * FOUR_BY_PI
+	vmla.f32 q14, q13, q15  @ Final cos value. Avoid WAW
+
 	vst1.32	{q14}, [r0]!               @ store result for cos
 	.loc 1 27 0
 	@start of tan
