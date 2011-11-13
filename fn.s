@@ -32,6 +32,7 @@ make_tables:
 .LVL0:
 	str	r4, [sp, #-4]!
 	.save {r4}
+	vpush	{q4-q7}
 .LCFI0:
 	.cfi_def_cfa_offset 4
 	fmsr	s15, r3
@@ -46,60 +47,67 @@ make_tables:
 	mov	r3, #0
 	mov	ip, r3
 .LVL2:
-	fdivs	s4, s15, s14
+	fdivs	s0, s15, s14  @s15 : range, @s14 : count
 	.loc 1 25 0
-	flds	s5, .L6
-	flds	s6, .L6+4
-	flds	s7, .L6+8
-	flds	s8, .L6+12
+	ldr	r3, =.L6
+	vld1.32	{d8[], d9[]}, [r3]!	@load cc4 in q4
+	vld1.32	{d6[], d7[]}, [r3]!	@load cc3 in q3
+	vld1.32	{d4[], d5[]}, [r3]!	@load cc2 in q2
+	vld1.32	{d2[], d3[]}, [r3]!	@load cc1 in q1
+
+	vld1.32 {d0[1]}, [r3]!		@load FOUR_BY_PI in d0[1]
+	vld1.32 {d10[], d11[]}, [r3]!	@load tc2 in q5
+	vld1.32 {d12[], d13[]}, [r3]!	@load tc1 in q6
+	vld1.32 {d14[], d15[]}, [r3]!	@load -tc3 in q7
+
+	mov	r4, #4
+	vdup.32	q8, r4	
+	vcvt.f32.u32 q8, q8
+
+	vld1.32 {q9}, [r3]!
+	vcvt.f32.u32 q9, q9
 	.loc 1 27 0
-	flds	s9, .L6+16
 	.loc 1 29 0
-	flds	s10, .L6+20
-	flds	s11, .L6+24
-	flds	s12, .L6+28
 .L3:
 	.loc 1 22 0
-	fmsr	s13, ip	@ int
-	fuitos	s15, s13
 .LVL3:
-	fmuls	s15, s4, s15
+	vmul.f32	q10, q9, d0[0]
 .LVL4:
 	.loc 1 24 0
-	fmuls	s14, s15, s15 	@ x2 = x * x
+	vmul.f32	q11, q10, q10
 	.loc 1 25 0
-	fcpys	s13, s6		@ start computing approximation of cos(x)
-	fmacs	s13, s14, s5
-	fcpys	s3, s7
-	fmacs	s3, s13, s14
-	fcpys	s13, s3
-	fcpys	s3, s8
-	fmacs	s3, s13, s14
-	fmrs	r4, s3
-	str	r4, [r0, r3]	@ float . store c[i]. r0 points to c[0]
+	vmov	q15, q3
+	vmla.f32 q15, q11, q4
+	vmov	q14, q2
+	vmla.f32 q14, q15, q11
+	vmov 	q13, q1
+	vmla.f32 q13, q14, q11
+	vst1.32	{q13}, [r0]!
 	.loc 1 27 0
-	fmuls	s15, s15, s9 	@ start computing approximation of tan(x)
+	@start of tan
+	vmul.f32	q10, q10, d0[1] 
 .LVL5:
 	.loc 1 28 0
-	fmuls	s14, s15, s15
-	.loc 1 29 0
-	fcpys	s13, s11
-	fmacs	s13, s14, s10
-	fmuls	s15, s15, s13
+	vmul.f32	q11, q10, q10
+	vmov	q15, q6
+	vmla.f32 q15, q5, q11
+	vmul.f32 q15, q15, q10
 .LVL6:
-	fsubs	s14, s14, s12
-	fdivs	s15, s15, s14
-	fmrs	r4, s15
-	str	r4, [r1, r3]	@ float ; store t[i]. r1 points to t[0]
+	vsub.f32	q14, q11, q7
+	vrecpe.f32 q13, q14
+	vmul.f32 q13, q13, q15
+	vst1.32	{q13}, [r1]!
 	.loc 1 34 0
-	add	ip, ip, #1
-	add	r3, r3, #4	@ increment offset in arrays
+	add	ip, ip, #4
+	vadd.f32 q9, q9, q8
+	@add	r3, r3, #4	@ increment offset in arrays
 	.loc 1 21 0
 	cmp	r2, ip		@ test for end of loop
 	bhi	.L3
 .LVL7:
 .L4:
 	.loc 1 37 0
+	vpop	{q4-q7}
 	ldmfd	sp!, {r4}
 	bx	lr
 .L7:
@@ -109,10 +117,14 @@ make_tables:
 	.word	1026158350
 	.word	-1090521978
 	.word	1065353104
-	.word	1067645315
+	.word	1067645315   @ THIS IS FOUR_OVER_PI
 	.word	1040826008
 	.word	-1068843589
 	.word	1082200313
+	.word	0
+	.word	1
+	.word	2
+	.word	3
 	.cfi_endproc
 .LFE0:
 	.fnend
