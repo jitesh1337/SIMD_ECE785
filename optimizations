@@ -1,0 +1,98 @@
+1) Vectorise the code (NOT using Estrin's algorithm yet)
+--------------------------------------------------------
+The analysis of true-dependencies on the code reveals that there no loop-carried dependencies. Also, all operations are 32-bit floating point operations. Thus, it is possible to vectorise the loop into 4 lanes (Since, NEON provides quad-word registers which can do 4 32-bit floating point operations in parallel). With this observation, the next step is to design the layout of which q-registers will store what.
+
+Following the final layout that is used:
+q0 :
+	s0  : Range/count
+	s1  : FOUR_BY_PI
+	s2 and s3 are unused.
+q1 : {cc1, cc1, cc1, cc1}
+q2 : {cc2, cc2, cc2, cc2}
+q3 : {cc3, cc3, cc3, cc3}
+q4 : {cc4, cc4, cc4, cc4}
+q5 : {tc2, tc2, tc2, tc2}
+q6 : {tc1, tc1, tc1, tc1}
+q7 : {-tc3, -tc3, -tc3, -tc3}
+q8 : {4.0, 4.0, 4.0, 4.0}
+q9 : {i, i+1, i+2, i+3}
+q10: {x(i), x(i+1), x(i+2), x(i+3)}
+q11: q10^2
+q12, q13, q14, q15 are used as scratch registers.
+ 
+Note that it would have been possible to store the constants ("cc1",etc) in only one lane, since NEON supports vector multiplication with a scalar. But, unfortunately there is no instruction (that we could find) for adding a vector to a scalar. Thus, we need to store the constants as vectors.
+
+With the above layout, four iterations can be done in parallel.
+
+Writing vectorised code for both cos and tan calculations gave us a final execution time of 3.9ms (i.e. 39 cycles/iteration).
+
+
+
+2) Apply Estrin's algorithm
+---------------------------
+Following is the formula used for cosine approximation:
+c[i] = (cc1 + x2*(cc2 + x2*(cc3 + cc4*x2)));
+|  cc4   x2
+|   \    /
+|    \  /
+|     *     cc3
+|      \    /
+|       \  /
+|        +     x2
+|         \    /
+|          \  /
+|           *     cc2
+|            \    /
+|             \  /
+|              +    x2
+|               \   /
+|                \ /
+|                 *    cc1
+|                  \    /
+|                   \  /
+|                    c[i]
+
+This calculation has to be done in a waterfall fashion. The output of (cc4*x2) is fed to the addtion to cc3 and so on. Since, vector operations are not single cycle operations, there are significant bubbles in the NEON pipleine. Re-arranging the above equation to enable interleaved operations is much more efficient.
+
+c[i] = (cc1 + x2*cc2) + x4*(cc3 + cc4*x2)
+| cc2    x2       cc4   x2
+|  \    /          \    /
+|   \  /            \  /
+|    *    cc1        *    cc3
+|    \    /          \    /
+|     \  /            \  /
+|      +        cc4    +    
+|       \        \    /
+|        \        \  /
+|         \        *
+|          \      /
+|           \    /
+|             +
+|             |
+|            c[i]
+
+In the above equation, the two quantities in the paranthesis have no inter-dependencies. Thus, one can help fill-up the pipeline bubble due to the other. The DFGs clearly show the inter-dependencies. The two branches of the second DFG can be interleaved to avoid pipeline bubbles.
+
+Applying Estrin's method reduces the time to 3.7ms (i.e. 37 cycles/iteration)
+
+
+3) Code re-arrangement
+----------------------
+Following guidelines are used for code-rearrangement:
+i) Avoiding Load penalties: There is a considerable delay between a load and the point where the loaded values can be used. Cache-misses will exacerbate the difference. The access pattern for our code is predictable and hence, prefetching will work well, but there is still a penalty involved. This observation led us to store all needed values in the NEON Registers themselves, including constants. All loads are hoisted above the loop so that there are no loads at all in the loop body.
+
+ii) Minimise RAW and WAW hazards. Interleaving instructions between RAW and WAW instructions saves lots of pipelines stalls! In our case, it almost saved us 4 cycles/iteration. This is because it needs multiple cycles for a value to be ready for it to be written/read. The pipeline has to stall till then. But, we can still do useful work by avoiding using registers that cause a hazard. Thus, we hoisted up instructions and in general tried to avoid RAW and WAW hazards.
+
+iii) Dependencies between CPU and Neon registers is another major bottleneck. We moved all the dependent registers in the NEON register bank. The loop counter is still a CPU operation, thus it makes sense to keep loop counters in the CPU registers. A copy of "i" is kept in the NEON registers apart from the CPU register to speed-up calculation of "x" (x = i * range/count). 
+
+iv) Mix storage and computation instructions. As noted in the class, NEON can perform storage and computation in parallel. Thus, we tried to interleave as many storage and computation instructions as possible. 
+
+The overall speed-up obtained by the code rearrangement was significant. Execution time reduced to 3.2ms i.e. 32 cycles/iteration! 
+
+
+4) Loop unrolling
+-----------------
+Since our iteration body doesn't have conditional execution, intruction pre-fetching will work well inside the body. Thus, we unrolled the loop once. This saved us a couple of instructions (a loop counter increment and a compare) per two loop iterations. The time reduced to 31 cycles/iteration.
+
+
+The final time metric we obtained was: 31 cycles/iteration. 

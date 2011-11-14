@@ -1,0 +1,141 @@
+Arrangement of registers:
+q0 :
+	s0  : Range/count
+	s1  : FOUR_BY_PI
+	s2 and s3 are unused.
+
+q1 : {cc1, cc1, cc1, cc1}
+q2 : {cc2, cc2, cc2, cc2}
+q3 : {cc3, cc3, cc3, cc3}
+q4 : {cc4, cc4, cc4, cc4}
+q5 : {tc2, tc2, tc2, tc2}
+q6 : {tc1, tc1, tc1, tc1}
+q7 : {-tc3, -tc3, -tc3, -tc3}
+q8 : {4.0, 4.0, 4.0, 4.0}
+q9 : {i, i+1, i+2, i+3}
+q10: {x(i), x(i+1), x(i+2), x(i+3)}
+q11: q10^2
+
+q12, q13, q14, q15 are used as scratch registers.
+q4-q7 are appropriately pushed and popped from the stack to preserve their contents.
+
+
+.LVL2:
+@ s15 has "range" and s14 has "count". 
+	fdivs	s0, s15, s14  @s15 : range, @s14 : count
+
+@ Load the base address of location of all constants in r3
+	ldr	r3, =.L6
+	vld1.32	{d8[], d9[]}, [r3]!	@load cc4 in the 4 lanes of q4
+	vld1.32	{d6[], d7[]}, [r3]!	@load cc3 in the 4 lanes of q3
+	vld1.32	{d4[], d5[]}, [r3]!	@load cc2 in the 4 lanes of q2
+	vld1.32	{d2[], d3[]}, [r3]!	@load cc1 in the 4 lanes of q1
+
+	vld1.32 {d0[1]}, [r3]!		@load FOUR_BY_PI in s1
+	vld1.32 {d10[], d11[]}, [r3]!	@load tc2 in the four lanes of q5
+	vld1.32 {d12[], d13[]}, [r3]!	@load tc1 in the four lanes of q6
+	vld1.32 {d14[], d15[]}, [r3]!	@load -tc3 in the four lanes of q7
+
+@ Put {4,4,4,4} in q8. This vector is used to increment counter vector
+	mov	r4, #4
+	vdup.32	q8, r4	
+	vcvt.f32.u32 q8, q8
+
+@ Load the {i, i+1, i+2, i+3} vector
+	vld1.32 {q9}, [r3]!
+	vcvt.f32.u32 q9, q9
+
+.L3:
+.LVL3:
+@Calculate x = i * range/count. Four "x" values in parallel.
+	vmul.f32	q10, q9, d0[0] 
+.LVL4:
+	vmov q15, q3             @Load cc3 in q15
+	vmul.f32  q11, q10, q10  @x2 = x * x
+
+@ Needed for Estrin's method.
+	vmov q14, q1	         @Load cc1 in q14
+	vmul.f32 q13, q11, q11   @calculate x4
+
+	vmla.f32 q15, q11, q4    @ cc3 + cc4*x2
+
+	vmla.f32 q14, q11, q2	@cc1 + cc2*x2
+
+@ technically, the following instruction is needed for tan calculation
+@ but, hoisting it above avoid pipeline bubbles!
+	vmul.f32	q10, q10, d0[1]    @x = x * FOUR_BY_PI
+	vmla.f32 q14, q13, q15             @ Final cos value. Avoid WAW on q14.
+
+	vst1.32	{q14}, [r0]!               @ store result for cos
+
+	@start of tan
+.LVL5:
+	vmul.f32	q11, q10, q10     @ x2 = x * x
+	vmov	q15, q6                   @load tc1 in q15 
+	vadd.f32 q9, q9, q8               @Increment "i" array. Hoisted up.
+	vmla.f32 q15, q5, q11		  @tc1 + tc2 * x2
+	vsub.f32	q14, q11, q7 	  @tc2 + x2
+	vmul.f32 q15, q15, q10		  @x2 * Numerator
+.LVL6:
+	vrecpe.f32 q13, q14		  @ Reverse denominator
+
+@FOLLOWING VMUL INSTRUCTION BELONGS TO NEXT LOOP ITERATION. HOISTED 
+@UP FOR EFFICIENCY.
+	vmul.f32  q10, q9, d0[0]          @x = i * range/count
+
+	vmul.f32 q13, q13, q15		  @Final tan value
+	vst1.32	{q13}, [r1]!		  @ store
+
+@--------------------------------------------------------
+@ END OF ONE ITERATION. WHAT FOLLOWS IS THE UNROLLED LOOP.
+@--------------------------------------------------------
+
+	vmov q15, q3         @Load cc3 in q15
+	vmul.f32	q11, q10, q10  @x2 = x * x
+
+	vmov q14, q1	     @Load cc1 in q14
+	vmul.f32 q13, q11, q11   @calculate x4
+
+	vmla.f32 q15, q11, q4    @ cc3 + cc4*x2
+
+	vmla.f32 q14, q11, q2	@cc1 + cc2*x2
+	vmul.f32	q10, q10, d0[1]    @x = x * FOUR_BY_PI
+	vmla.f32 q14, q13, q15  @ Final cos value. Avoid WAW
+
+	vst1.32	{q14}, [r0]!               @ store result for cos
+
+	@start of tan
+	vmul.f32	q11, q10, q10     @ x2 = x * x
+	vmov	q15, q6                   @load tc1 in q15 
+	vadd.f32 q9, q9, q8               @Increment "i" array
+	vmla.f32 q15, q5, q11		  @tc1 + tc2 * x2
+	vsub.f32	q14, q11, q7 	  @tc2 + x2
+	vmul.f32 q15, q15, q10		  @x2 * Numerator
+	vrecpe.f32 q13, q14		  @ Reverse denominator
+	add	ip, ip, #8		  @ Increment loop counter. HOISTED UP.
+	cmp	r2, ip		@ test for end of loop
+	vmul.f32 q13, q13, q15		  @Final tan value
+	vst1.32	{q13}, [r1]!		  @ store
+	bhi	.L3
+.LVL7:
+.L4:
+	.loc 1 37 0
+	vpop	{q4-q7}
+	ldmfd	sp!, {r4}
+	bx	lr
+.L7:
+	.align	2
+.L6:
+	.word	-1163485514  @cc4
+	.word	1026158350   @cc3
+	.word	-1090521978  @cc2
+	.word	1065353104   @cc1
+	.word	1067645315   @ THIS IS FOUR_OVER_PI
+	.word	1040826008   @tc2
+	.word	-1068843589  @tc1
+	.word	1082200313   @-tc3
+	.word	0
+	.word	1
+	.word	2
+	.word	3
+	.cfi_endproc
